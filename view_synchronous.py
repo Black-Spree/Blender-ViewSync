@@ -1,3 +1,4 @@
+from multiprocessing import context
 import bpy
 import gpu
 from bpy.props import IntProperty,BoolProperty,StringProperty,PointerProperty,CollectionProperty
@@ -11,6 +12,8 @@ class view_synchronous_info_view(bpy.types.PropertyGroup):
     view:IntProperty(name="view")
     # 是否开始同步
     start_synchronous:BoolProperty(name="start_synchronous",default=False)
+    # 仅同步旋转
+    only_rotate:BoolProperty(name="only_rotate",default=False)
     # 同步目标
     target:IntProperty(name="target",default=-1)
 
@@ -22,29 +25,49 @@ class view_synchronous_info_workspace(bpy.types.PropertyGroup):
     is_tag:BoolProperty(name="开启标记")
     # 当前处理的对象
     target:IntProperty(name="当前对象",default=-1)
-    # 
+    # 当前工作区下所有的3D视图结构体
     infos:CollectionProperty(type=view_synchronous_info_view)
 
+def is_available_view_index(view_index):
+    areas = bpy.context.screen.areas
+    return view_index >= 0 and view_index < len(areas) and areas[view_index].type == 'VIEW_3D'
+    
+
 def synchronous():
+    '''
+    同步视图的操作
+    '''
     global_info = bpy.context.workspace.view_synchronous_info_workspace
     areas = bpy.context.screen.areas
     buf = []
+
     for index in range(0,len(global_info.infos)):
         info = global_info.infos[index]
-        if info.view > 0 and info.view < len(areas) and areas[info.view].type == 'VIEW_3D':
+        # 确保需要同步的视图是正确的视图
+        if is_available_view_index(info.view):
             buf.append(info.view)
-            if info.start_synchronous and info.target > 0 and info.target < len(areas) and areas[info.target].type == 'VIEW_3D':
-                areas[info.view].spaces[0].region_3d.view_matrix = areas[info.target].spaces[0].region_3d.view_matrix
+            # 开始同步试图
+            if info.start_synchronous and is_available_view_index(info.target):
+                if info.only_rotate:
+                    areas[info.view].spaces[0].region_3d.view_rotation = areas[info.target].spaces[0].region_3d.view_rotation
+                else:
+                    areas[info.view].spaces[0].region_3d.view_matrix = areas[info.target].spaces[0].region_3d.view_matrix
+            else:
+                info.target = -1
+        # 否则删除其结构体
         else:
             global_info.infos.remove(index)
+
+    # 为存在但未创建结构体的View创建结构体
     for index in range(len(areas)):
         if areas[index].type == 'VIEW_3D' and not index in buf:
             i = global_info.infos.add()
             i.view = index
 
-
-
 class view_synchronous(bpy.types.Panel):
+    '''
+    N键面板
+    '''
     bl_label = "视图同步"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -87,13 +110,17 @@ class view_synchronous(bpy.types.Panel):
                 else:
                     row.label(text=str(info.target))
                 row.operator("beta.set_target",text="设置目标")
-                box.prop(info,"start_synchronous",text="开始跟踪目标")
+                box.prop(info,"start_synchronous",text="开始同步视图")
+                box.prop(info,"only_rotate",text="仅同步旋转")
                 break
         if flage:
             box.label(text="当前视图未同步")
 
 
 class next_view(bpy.types.Operator):
+    '''
+    下个视图的命令
+    '''
     bl_idname = "beta.next_view"
     bl_label = "Next View"
     bl_options = {"REGISTER"}
@@ -122,6 +149,9 @@ class next_view(bpy.types.Operator):
         return {"FINISHED"}
 
 class set_target(bpy.types.Operator):
+    '''
+    设置目标的 命令
+    '''
     bl_idname = "beta.set_target"
     bl_label = "Set Target"
     bl_options = {"REGISTER"}
